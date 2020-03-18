@@ -70,7 +70,8 @@ public:
     auto coeffApplier = coeff_applier();
 
     const auto nodesPerEntity = nodesPerEntity_;
-
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+    
     Kokkos::parallel_for(
       team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
         auto bktId = buckets.device_get(team.league_rank());
@@ -99,6 +100,7 @@ public:
               smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
           });
       });
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
   }
 
 protected:

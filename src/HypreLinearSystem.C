@@ -37,6 +37,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iostream>
+#include <fstream>
 
 namespace sierra {
 namespace nalu {
@@ -49,8 +51,19 @@ HypreLinearSystem::HypreLinearSystem(
   : LinearSystem(realm, numDof, eqSys, linearSolver),
     rowFilled_(0),
     rowStatus_(0),
-    idBuffer_(0)
-{}
+    idBuffer_(0),
+    name_(eqSys->name_),
+    userSuppliedName_(eqSys->userSuppliedName_)
+{
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
+  rows_.resize(0);
+  cols_.resize(0);
+  vals_.resize(0);
+  ids_.resize(0);
+  id_ = 0;
+  numAssembles_=0;
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
+}
 
 HypreLinearSystem::~HypreLinearSystem()
 {
@@ -65,6 +78,7 @@ HypreLinearSystem::~HypreLinearSystem()
 void
 HypreLinearSystem::beginLinearSystemConstruction()
 {
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
   if (inConstruction_) return;
   inConstruction_ = true;
 
@@ -99,7 +113,7 @@ HypreLinearSystem::beginLinearSystemConstruction()
   // Total number of global rows in the system
   maxRowID_ = realm_.hypreNumNodes_ * numDof_ - 1;
 
-#if 0
+#if 1
   if (numDof_ > 0)
     std::cerr << rank << "\t" << numDof_ << "\t"
               << realm_.hypreILower_ << "\t" << realm_.hypreIUpper_ << "\t"
@@ -137,6 +151,7 @@ HypreLinearSystem::beginLinearSystemConstruction()
     realm_.periodicManager_->periodic_parallel_communicate_field(
       realm_.hypreGlobalId_);
   }
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
 }
 
 void
@@ -250,6 +265,7 @@ HypreLinearSystem::buildDirichletNodeGraph(
 void
 HypreLinearSystem::finalizeLinearSystem()
 {
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
   ThrowRequire(inConstruction_);
   inConstruction_ = false;
 
@@ -268,11 +284,13 @@ HypreLinearSystem::finalizeLinearSystem()
   // At this stage the LHS and RHS data structures are ready for
   // sumInto/assembly.
   systemInitialized_ = true;
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
 }
 
 void
 HypreLinearSystem::finalizeSolver()
 {
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
   MPI_Comm comm = realm_.bulk_data().parallel();
   // Now perform HYPRE assembly so that the data structures are ready to be used
   // by the solvers/preconditioners.
@@ -292,6 +310,7 @@ HypreLinearSystem::finalizeSolver()
   HYPRE_IJVectorSetObjectType(sln_, HYPRE_PARCSR);
   HYPRE_IJVectorInitialize(sln_);
   HYPRE_IJVectorGetObject(sln_, (void**)&(solver->parSln_));
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
 }
 
 void
@@ -315,16 +334,113 @@ HypreLinearSystem::loadComplete()
     if (rowFilled_[i] == RS_FILLED) continue;
     HypreIntType lid = iLower_ + i;
     HYPRE_IJMatrixGetValues(mat_, hnrows, &hncols, &lid, &lid, &getval);
-    if (std::fabs(getval) < 1.0e-12)
+    if (std::fabs(getval) < 1.0e-12) {
       HYPRE_IJMatrixSetValues(mat_, hnrows, &hncols, &lid, &lid, &setval);
+      rows_.push_back(lid);
+      cols_.push_back(lid);
+      vals_.push_back(setval);
+      ids_.push_back(id_);
+      id_++;
+    }
   }
 
   loadCompleteSolver();
+
+  numAssembles_++;
+  printf("%s %s %d : %s %s numAssembles_=%d, id_=%d, rows=%lu, cols=%lu, ids=%lu, vals=%lu\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str(),numAssembles_,id_,rows_.size(),cols_.size(),ids_.size(),vals_.size());
+
+  char fname[50];
+  sprintf(fname,"%s_rowIndices%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream rfile(fname, std::ios::out | std::ios::binary);
+  rfile.write((char*)&rows_[0], rows_.size() * sizeof(HypreIntType));
+  rfile.close();
+
+  sprintf(fname,"%s_colIndices%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream cfile(fname, std::ios::out | std::ios::binary);
+  cfile.write((char*)&cols_[0], cols_.size() * sizeof(HypreIntType));
+  cfile.close();
+
+  sprintf(fname,"%s_elementIds%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream idfile(fname, std::ios::out | std::ios::binary);
+  idfile.write((char*)&ids_[0], ids_.size() * sizeof(HypreIntType));
+  idfile.close();
+
+  sprintf(fname,"%s_values%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream vfile(fname, std::ios::out | std::ios::binary);
+  vfile.write((char*)&vals_[0], vals_.size() * sizeof(double));
+  vfile.close();
+
+  std::vector<HypreIntType> metaData(0);
+  metaData.push_back((HypreIntType)iLower_);
+  metaData.push_back((HypreIntType)iUpper_);
+  metaData.push_back((HypreIntType)jLower_);
+  metaData.push_back((HypreIntType)jUpper_);
+  metaData.push_back((HypreIntType)vals_.size());
+  sprintf(fname,"%s_metaData%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream mdfile(fname, std::ios::out | std::ios::binary);
+  long pos = mdfile.tellp();
+  int size = sizeof(HypreIntType);
+  mdfile.write((char *)&size, 4);
+  mdfile.seekp(pos+4);
+  mdfile.write((char*)&metaData[0], metaData.size() * sizeof(HypreIntType));
+  mdfile.close();
+
+  void * object;
+  HYPRE_IJMatrixGetObject(mat_, &object);
+  hypre_CSRMatrix * diag = hypre_ParCSRMatrixDiag((HYPRE_ParCSRMatrix) (object));
+  HYPRE_Int * hr = (HYPRE_Int *) hypre_CSRMatrixI(diag);
+  HYPRE_Int * hc = (HYPRE_Int *) hypre_CSRMatrixJ(diag);
+  double * hd = (double *) hypre_CSRMatrixData(diag);
+  HYPRE_Int num_rows = diag->num_rows;
+  HYPRE_Int num_nonzeros = diag->num_nonzeros;
+
+  sprintf(fname,"%s_HypreRows%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream hrfile(fname, std::ios::out | std::ios::binary);
+  std::vector<HypreIntType> tmp(num_rows+1);
+  for (int i=0; i<num_rows+1; ++i) { tmp[i] = (HypreIntType)hr[i]; }
+  hrfile.write((char*)&tmp[0], (num_rows+1) * sizeof(HypreIntType));
+  hrfile.close();
+
+  sprintf(fname,"%s_HypreCols%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream hcfile(fname, std::ios::out | std::ios::binary);
+  tmp.resize(num_nonzeros);
+  for (int i=0; i<num_nonzeros; ++i) { tmp[i] = (HypreIntType)hc[i]; }
+  hcfile.write((char*)&tmp[0], num_nonzeros * sizeof(HypreIntType));
+  hcfile.close();
+
+  sprintf(fname,"%s_HypreData%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream hdfile(fname, std::ios::out | std::ios::binary);
+  hdfile.write((char*)&hd[0], num_nonzeros * sizeof(double));
+  hdfile.close();
+
+  std::vector<HypreIntType> hmetaData(0);
+  hmetaData.push_back((HypreIntType)num_rows);
+  hmetaData.push_back((HypreIntType)num_nonzeros);
+  sprintf(fname,"%s_HypreMetaData%d.bin",name_.c_str(),numAssembles_);
+  std::ofstream hmdfile(fname, std::ios::out | std::ios::binary);
+  pos = hmdfile.tellp();
+  hmdfile.write((char *)&size, 4);
+  hmdfile.seekp(pos+4);
+  hmdfile.write((char*)&hmetaData[0], hmetaData.size() * sizeof(HypreIntType));
+  hmdfile.close();
+
+  printf("%s %s %d : %s %s numAssembles_=%d, id_=%d, rows=%lu, cols=%lu, ids=%lu, vals=%lu\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str(),numAssembles_,id_,rows_.size(),cols_.size(),ids_.size(),vals_.size());
+
+  rows_.resize(0);
+  cols_.resize(0);
+  vals_.resize(0);
+  ids_.resize(0);
+  id_ = 0;
+
+  printf("%s %s %d id_=%d, rows=%lu, cols=%lu, ids=%lu, vals=%lu\n",
+	 __FILE__,__FUNCTION__,__LINE__,id_,rows_.size(),cols_.size(),ids_.size(),vals_.size());
+
 }
 
 void
 HypreLinearSystem::loadCompleteSolver()
 {
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
   // Now perform HYPRE assembly so that the data structures are ready to be used
   // by the solvers/preconditioners.
   HypreDirectSolver* solver = reinterpret_cast<HypreDirectSolver*>(linearSolver_);
@@ -343,6 +459,8 @@ HypreLinearSystem::loadCompleteSolver()
   // Set flag to indicate zeroSystem that the matrix must be reinitialized
   // during the next invocation.
   matrixAssembled_ = true;
+
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
 }
 
 void
@@ -426,11 +544,19 @@ HypreLinearSystem::sumInto(
                                 &idBuffer_[0], cur_lhs);
       HYPRE_IJVectorAddToValues(rhs_, 1, &lid, &rhs[ir]);
 
+      for (int k=0; k<numRows; ++k) {
+	rows_.push_back(lid);
+	cols_.push_back(idBuffer_[k]);
+	vals_.push_back(cur_lhs[k]);
+	ids_.push_back(id_);
+      }
       if ((lid >= iLower_) && (lid <= iUpper_))
         rowFilled_[lid - iLower_] = RS_FILLED;
     }
   }
 #endif
+  /* increment the element counter */
+  id_++;
 }
 
 
@@ -480,10 +606,19 @@ HypreLinearSystem::sumInto(
       HYPRE_IJMatrixAddToValues(mat_, 1, &numRows, &lid,
                                 &idBuffer_[0], &scratchVals[0]);
       HYPRE_IJVectorAddToValues(rhs_, 1, &lid, &rhs[ir]);
+
+      for (int k=0; k<numRows; ++k) {
+	rows_.push_back(lid);
+	cols_.push_back(idBuffer_[k]);
+	vals_.push_back(scratchVals[k]);
+	ids_.push_back(id_);
+      }
+
       if ((lid >= iLower_) && (lid <= iUpper_))
         rowFilled_[lid - iLower_] = RS_FILLED;
     }
   }
+  id_++;
 }
 
 void
@@ -494,6 +629,8 @@ HypreLinearSystem::applyDirichletBCs(
   const unsigned,
   const unsigned)
 {
+  printf("%s %s %d : name_=%s userSuppliedName_=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),userSuppliedName_.c_str());
+
   auto& meta = realm_.meta_data();
 
   const stk::mesh::Selector sel = (
@@ -524,9 +661,15 @@ HypreLinearSystem::applyDirichletBCs(
         HYPRE_IJMatrixSetValues(mat_, 1, &ncols, &lid, &lid, &diag_value);
         HYPRE_IJVectorSetValues(rhs_, 1, &lid, &bcval);
         rowFilled_[lid - iLower_] = RS_FILLED;
+
+	rows_.push_back(lid);
+	cols_.push_back(lid);
+	vals_.push_back(diag_value);
+	ids_.push_back(id_);
       }
     }
   }
+  id_++;
 }
 
 HypreIntType
@@ -556,6 +699,8 @@ HypreLinearSystem::get_entity_hypre_id(const stk::mesh::Entity& node)
 int
 HypreLinearSystem::solve(stk::mesh::FieldBase* linearSolutionField)
 {
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+
   HypreDirectSolver* solver = reinterpret_cast<HypreDirectSolver*>(
     linearSolver_);
 
