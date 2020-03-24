@@ -39,6 +39,8 @@
 #include <ScratchViews.h>
 #include <CopyAndInterleave.h>
 
+#include <sys/time.h>
+
 namespace sierra{
 namespace nalu{
 
@@ -97,6 +99,11 @@ AssembleElemSolverAlgorithm::execute()
   int rhsSize = rhsSize_;
   unsigned nodesPerEntity = nodesPerEntity_;
 
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  struct timeval start, stop;
+  double secs = 0;
+  gettimeofday(&start, NULL);
+
   run_algorithm(
     realm_.bulk_data(),
     KOKKOS_LAMBDA(SharedMemData<DeviceTeamHandleType, DeviceShmem> & smdata) {
@@ -121,6 +128,10 @@ AssembleElemSolverAlgorithm::execute()
                     smdata.scratchIds, smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
       }
     });
+
+  gettimeofday(&stop, NULL);
+  secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
+  printf("%s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
 }
 
 } // namespace nalu

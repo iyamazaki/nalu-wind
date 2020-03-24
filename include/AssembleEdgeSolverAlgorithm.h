@@ -71,6 +71,10 @@ public:
 
     const auto nodesPerEntity = nodesPerEntity_;
     printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+
+    struct timeval start, stop;
+    double secs = 0;
+    gettimeofday(&start, NULL);
     
     Kokkos::parallel_for(
       team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
@@ -100,7 +104,10 @@ public:
               smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
           });
       });
-    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+
+    gettimeofday(&stop, NULL);
+    secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
+    printf("%s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
   }
 
 protected:

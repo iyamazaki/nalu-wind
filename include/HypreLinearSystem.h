@@ -44,10 +44,8 @@ public:
   std::vector<HypreIntType> rows_;
   std::vector<HypreIntType> cols_;
   std::vector<double> vals_;
-  std::vector<HypreIntType> ids_;
   std::string name_;
   std::string userSuppliedName_;
-  HypreIntType id_;
   int numAssembles_;
 
   // Quiet "partially overridden" compiler warnings.
