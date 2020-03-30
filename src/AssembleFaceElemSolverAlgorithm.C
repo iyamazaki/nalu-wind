@@ -86,6 +86,12 @@ AssembleFaceElemSolverAlgorithm::initialize_connectivity()
 void
 AssembleFaceElemSolverAlgorithm::execute()
 {
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
+  struct timeval start, stop;
+  double secs = 0;
+  gettimeofday(&start, NULL);
+
   for (auto kernel : activeKernels_) {
     kernel->setup(*realm_.timeIntegrator_);
   }
@@ -93,11 +99,14 @@ AssembleFaceElemSolverAlgorithm::execute()
   auto ngpKernels = nalu_ngp::create_ngp_view<Kernel>(activeKernels_);
   const size_t numKernels = activeKernels_.size();
   auto coeffApplier = coeff_applier();
+  auto newCoeffApplier = new_coeff_applier();
 
   const unsigned nodesPerEntity = nodesPerElem_;
   const unsigned numDof = numDof_;
   double diagRelaxFactor = diagRelaxFactor_;
 
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
   run_face_elem_algorithm(realm_.bulk_data(),
     KOKKOS_LAMBDA(sierra::nalu::SharedMemData_FaceElem<DeviceTeamHandleType,DeviceShmem> &smdata)
     {
@@ -126,6 +135,10 @@ AssembleFaceElemSolverAlgorithm::execute()
                       smdata.scratchIds, smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
         }
     });
+  eqSystem_->linsys_->printInfo();
+  gettimeofday(&stop, NULL);
+  secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
+  printf("Done %s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
 }
 
 } // namespace nalu

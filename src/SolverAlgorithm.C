@@ -73,6 +73,23 @@ NGPApplyCoeff::NGPApplyCoeff(EquationSystem* eqSystem)
   }
 }
 
+NGPApplyCoeff::NGPApplyCoeff(EquationSystem* eqSystem, bool newVersion)
+  : ngpMesh_(eqSystem->realm_.ngp_mesh()),
+    deviceSumInto_(eqSystem->linsys_->get_new_coeff_applier()),
+    nDim_(eqSystem->linsys_->numDof()),
+    hasOverset_(eqSystem->realm_.hasOverset_),
+    extractDiagonal_(eqSystem->extractDiagonal_)
+{
+  if (extractDiagonal_) {
+    diagField_ = nalu_ngp::get_ngp_field(
+      eqSystem->realm_.mesh_info(), eqSystem->get_diagonal_field()->name());
+  }
+
+  if (hasOverset_) {
+    iblankField_ = nalu_ngp::get_ngp_field<int>(eqSystem->realm_.mesh_info(), "iblank");
+  }
+}
+
 void NGPApplyCoeff::extract_diagonal(
   const unsigned int nEntities,
   const ngp::Mesh::ConnectedNodes& entities,

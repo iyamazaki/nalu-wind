@@ -30,6 +30,8 @@ struct NGPApplyCoeff
 {
   NGPApplyCoeff(EquationSystem*);
 
+  NGPApplyCoeff(EquationSystem*, bool newVersion);
+
   KOKKOS_INLINE_FUNCTION
   NGPApplyCoeff() = default;
 
@@ -82,11 +84,14 @@ public:
 
   virtual void execute() = 0;
   virtual void initialize_connectivity() = 0;
-
+  
 protected:
 
   NGPApplyCoeff coeff_applier()
   { return NGPApplyCoeff(eqSystem_); }
+
+  NGPApplyCoeff new_coeff_applier()
+  { return NGPApplyCoeff(eqSystem_,true); }
 
   // Need to find out whether this ever gets called inside a modification cycle.
   void apply_coeff(

@@ -45,8 +45,10 @@ public:
   std::vector<HypreIntType> cols_;
   std::vector<double> vals_;
   std::string name_;
-  std::string userSuppliedName_;
   int numAssembles_;
+  std::vector<HypreIntType> numPtsToAssembleVec_;
+  HypreIntType numPtsToAssemble_;
+  HypreIntType numUnfilledRows_;
 
   // Quiet "partially overridden" compiler warnings.
   using LinearSystem::buildDirichletNodeGraph;
@@ -65,15 +67,114 @@ public:
   virtual ~HypreLinearSystem();
 
   // Graph/Matrix Construction
-  virtual void buildNodeGraph(const stk::mesh::PartVector&);// for nodal assembly (e.g., lumped mass and source)
-  virtual void buildFaceToNodeGraph(const stk::mesh::PartVector&);// face->node assembly
-  virtual void buildEdgeToNodeGraph(const stk::mesh::PartVector&);// edge->node assembly
-  virtual void buildElemToNodeGraph(const stk::mesh::PartVector&);// elem->node assembly
+  virtual void buildNodeGraph(const stk::mesh::PartVector & parts);// for nodal assembly (e.g., lumped mass and source)
+  virtual void buildFaceToNodeGraph(const stk::mesh::PartVector & parts);// face->node assembly
+  virtual void buildEdgeToNodeGraph(const stk::mesh::PartVector & parts);// edge->node assembly
+  virtual void buildElemToNodeGraph(const stk::mesh::PartVector & parts);// elem->node assembly
   virtual void buildReducedElemToNodeGraph(const stk::mesh::PartVector&);// elem (nearest nodes only)->node assembly
-  virtual void buildFaceElemToNodeGraph(const stk::mesh::PartVector&);// elem:face->node assembly
+  virtual void buildFaceElemToNodeGraph(const stk::mesh::PartVector & parts);// elem:face->node assembly
   virtual void buildNonConformalNodeGraph(const stk::mesh::PartVector&);// nonConformal->elem_node assembly
   virtual void buildOversetNodeGraph(const stk::mesh::PartVector&);// overset->elem_node assembly
   virtual void finalizeLinearSystem();
+
+  //sierra::nalu::CoeffApplier* get_coeff_applier();
+
+  sierra::nalu::CoeffApplier* get_new_coeff_applier();
+
+  std::unique_ptr<CoeffApplier> newHostCoeffApplier;
+  CoeffApplier* newDeviceCoeffApplier = nullptr;
+
+
+  virtual void printInfo() {
+    printf("%s %s %d : name=%s, list length=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)rows_.size(),(int)skippedRows_.size());
+  }
+
+  class HypreLinSysCoeffApplier : public CoeffApplier
+  {
+  public:
+    KOKKOS_FUNCTION
+    HypreLinSysCoeffApplier(std::string name, unsigned numDof,
+			    std::unordered_set<HypreIntType> & skippedRows,
+			    std::vector<HypreIntType> numPtsToAssembleVec)
+      : name_(name), numDof_(numDof),
+	skippedRows_(skippedRows),
+	numPtsToAssembleVec_(numPtsToAssembleVec),
+	devicePointer_(nullptr)
+    {
+      printf("%s %s %d : name=%s : numDof_=%d, numPtsToAssemble=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),numDof_,(int)numPtsToAssemble_);
+
+      /* set key internal data */
+      counter_=-1;
+      numPtsToAssemble_=0;
+      numPartitions_=numPtsToAssembleVec_.size();
+
+      for (unsigned i=0; i<numPartitions_; ++i) {
+	numPtsToAssemble_+=numPtsToAssembleVec_[i];
+	printf("%d : %d %d\n",i,(int)numPtsToAssembleVec_[i],(int)numPtsToAssemble_);
+      }
+      
+
+      rows_ = Kokkos::View<HypreIntType *>("rows",numPtsToAssemble_);
+      cols_ = Kokkos::View<HypreIntType *>("cols",numPtsToAssemble_);
+      vals_ = Kokkos::View<double *>("vals",numPtsToAssemble_);
+      Kokkos::parallel_for("init", numPtsToAssemble_, KOKKOS_LAMBDA (const int& i) {
+	  /* initialize to the dummy value -1 so that row and cols entries in the list that aren't "filled in"
+	     are easily ignored during the full assembly process */
+	  rows_[i] = -1;
+	  cols_[i] = -1;
+	  vals_[i] = 0.;
+	});
+
+      printf("Done %s %s %d : name=%s : numDof_=%d, numPtsToAssemble=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),numDof_,(int)numPtsToAssemble_);
+    }
+
+    KOKKOS_FUNCTION
+    ~HypreLinSysCoeffApplier() {}
+
+    KOKKOS_FUNCTION
+    virtual void resetRows(unsigned numNodes,
+                           const stk::mesh::Entity* nodeList,
+                           const unsigned beginPos,
+                           const unsigned endPos,
+                           const double diag_value = 0.0,
+                           const double rhs_residual = 0.0) {}
+
+    KOKKOS_FUNCTION
+    virtual void operator()(unsigned numEntities,
+                            const ngp::Mesh::ConnectedNodes& entities,
+                            const SharedMemView<int*,DeviceShmem> & localIds,
+                            const SharedMemView<int*,DeviceShmem> & sortPermutation,
+                            const SharedMemView<const double*,DeviceShmem> & rhs,
+                            const SharedMemView<const double**,DeviceShmem> & lhs,
+                            const char * trace_tag);
+
+    virtual void resetInternalData() { 
+      printf("%s %s %d : name=%s : counter_=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),counter_);
+      counter_++;
+      counter_= (counter_%numPartitions_);
+      printf("%s %s %d : name=%s : counter_=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),counter_);
+    }
+
+    void free_device_pointer();
+
+    sierra::nalu::CoeffApplier* device_pointer();
+
+  private:
+    std::string name_;
+    unsigned numDof_=0;
+    /* initialize counter_ to -1 .Then, the first call to get_coeff_applier (get_new_coeff_applier) will bump it to 0.
+       Subsequent calls will bump it by 1 (mod numPartitions_) */
+    int counter_=-1;
+    unsigned numPartitions_=0;
+    std::unordered_set<HypreIntType> skippedRows_;
+    std::vector<HypreIntType> numPtsToAssembleVec_;
+    HypreIntType numPtsToAssemble_=0;
+    HypreLinSysCoeffApplier* devicePointer_;
+    Kokkos::View<HypreIntType*> rows_;
+    Kokkos::View<HypreIntType*> cols_;
+    Kokkos::View<double*> vals_;
+  };
+
 
   /** Tag rows that must be handled as a Dirichlet BC node
    *
@@ -213,6 +314,7 @@ public:
   virtual void writeSolutionToFile(const char * /* filename */, bool /* useOwned */ =true) {}
 
 protected:
+
   /** Prepare the instance for system construction
    *
    *  During initialization, this creates the hypre data structures via API

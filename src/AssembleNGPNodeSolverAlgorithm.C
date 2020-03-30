@@ -79,6 +79,12 @@ AssembleNGPNodeSolverAlgorithm::initialize_connectivity()
 void
 AssembleNGPNodeSolverAlgorithm::execute()
 {
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
+  struct timeval start, stop;
+  double secs = 0;
+  gettimeofday(&start, NULL);
+
   using ShmemDataType = SharedMemData_Node<DeviceTeamHandleType, DeviceShmem>;
 
   const size_t numKernels = nodeKernels_.size();
@@ -89,6 +95,7 @@ AssembleNGPNodeSolverAlgorithm::execute()
 
   auto ngpKernels = nalu_ngp::create_ngp_view<NodeKernel>(nodeKernels_);
   auto coeffApplier = coeff_applier();
+  auto newCoeffApplier = new_coeff_applier();
 
   const auto& meta = realm_.meta_data();
   const auto& ngpMesh = realm_.ngp_mesh();
@@ -107,6 +114,8 @@ AssembleNGPNodeSolverAlgorithm::execute()
 
   auto team_exec = get_device_team_policy(buckets.size(), bytes_per_team, bytes_per_thread);
 
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
   Kokkos::parallel_for(
     team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
       auto bktId = buckets.device_get(team.league_rank());
@@ -135,6 +144,10 @@ AssembleNGPNodeSolverAlgorithm::execute()
             smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
         });
     });
+  eqSystem_->linsys_->printInfo();
+  gettimeofday(&stop, NULL);
+  secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
+  printf("Done %s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
 }
 
 }  // nalu

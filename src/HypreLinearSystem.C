@@ -49,18 +49,18 @@ HypreLinearSystem::HypreLinearSystem(
   EquationSystem* eqSys,
   LinearSolver* linearSolver)
   : LinearSystem(realm, numDof, eqSys, linearSolver),
+    name_(eqSys->name_), numPtsToAssemble_(0), numUnfilledRows_(0),
     rowFilled_(0),
     rowStatus_(0),
-    idBuffer_(0),
-    name_(eqSys->name_),
-    userSuppliedName_(eqSys->userSuppliedName_)
+    idBuffer_(0)
 {
   printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
   rows_.resize(0);
   cols_.resize(0);
   vals_.resize(0);
+  numPtsToAssembleVec_.resize(0);
   numAssembles_=0;
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s\n\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
 }
 
 HypreLinearSystem::~HypreLinearSystem()
@@ -156,47 +156,166 @@ HypreLinearSystem::beginLinearSystemConstruction()
 
 void
 HypreLinearSystem::buildNodeGraph(
-  const stk::mesh::PartVector&)
+  const stk::mesh::PartVector & parts)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
   beginLinearSystemConstruction();
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  /* Add a new entry to this vector */
+  numPtsToAssembleVec_.push_back(0);
+  HypreIntType t = 0;
+
+  const stk::mesh::Selector s_owned = metaData.locally_owned_part()
+    & stk::mesh::selectUnion(parts)
+    & !(stk::mesh::selectUnion(realm_.get_slave_part_vector()))
+    & !(realm_.get_inactive_selector());
+
+  stk::mesh::BucketVector const& buckets =
+    realm_.get_buckets( stk::topology::NODE_RANK, s_owned );
+  for(size_t ib=0; ib<buckets.size(); ++ib) {
+    const stk::mesh::Bucket & b = *buckets[ib];
+    const stk::mesh::Bucket::size_type length   = b.size();
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      t+=numDof_;
+    }
+  }
+  numPtsToAssembleVec_.back()+=t;
+  numPtsToAssemble_+=t;
+  printf("Done %s %s %d : name=%s, numPts=%d, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)t,(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
+}
+
+
+void
+HypreLinearSystem::buildFaceToNodeGraph(const stk::mesh::PartVector & parts)
+{
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
+  beginLinearSystemConstruction();
+
+  /* Add a new entry to this vector */
+  numPtsToAssembleVec_.push_back(0);
+  HypreIntType t = 0;
+
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+  const stk::mesh::Selector s_owned = metaData.locally_owned_part()
+                                      & stk::mesh::selectUnion(parts)
+                                      & !(realm_.get_inactive_selector());
+  stk::mesh::BucketVector const& buckets = realm_.get_buckets(realm_.meta_data().side_rank(), s_owned);
+  for(size_t ib=0; ib<buckets.size(); ++ib) {
+    const stk::mesh::Bucket & b = *buckets[ib];
+    const stk::mesh::Bucket::size_type length   = b.size();
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      const unsigned numNodes = b.num_nodes(k);
+      t+=numNodes*numNodes*numDof_*numDof_;
+    }
+  }
+  numPtsToAssembleVec_.back()+=t;
+  numPtsToAssemble_+=t;
+  printf("Done %s %s %d : name=%s, numPts=%d, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)t,(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
 }
 
 void
-HypreLinearSystem::buildFaceToNodeGraph(
-  const stk::mesh::PartVector&)
+HypreLinearSystem::buildEdgeToNodeGraph(const stk::mesh::PartVector& parts)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
   beginLinearSystemConstruction();
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+
+  /* Add a new entry to this vector */
+  numPtsToAssembleVec_.push_back(0);
+  HypreIntType t = 0;
+
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+  const stk::mesh::Selector s_owned = metaData.locally_owned_part()
+                                      & stk::mesh::selectUnion(parts)
+                                      & !(realm_.get_inactive_selector());
+  stk::mesh::BucketVector const& buckets = realm_.get_buckets(stk::topology::EDGE_RANK, s_owned);
+  for(size_t ib=0; ib<buckets.size(); ++ib) {
+    const stk::mesh::Bucket & b = *buckets[ib];
+    const stk::mesh::Bucket::size_type length   = b.size();
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      const unsigned numNodes = b.num_nodes(k);
+      t+=numNodes*numNodes*numDof_*numDof_;
+    }
+  }
+  numPtsToAssembleVec_.back()+=t;
+  numPtsToAssemble_+=t;
+  printf("Done %s %s %d : name=%s, numPts=%d, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)t,(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
 }
 
 void
-HypreLinearSystem::buildEdgeToNodeGraph(
-  const stk::mesh::PartVector&)
+HypreLinearSystem::buildElemToNodeGraph(const stk::mesh::PartVector & parts)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
   beginLinearSystemConstruction();
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
-}
 
-void
-HypreLinearSystem::buildElemToNodeGraph(
-  const stk::mesh::PartVector&)
-{
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
-  beginLinearSystemConstruction();
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  /* Add a new entry to this vector */
+  numPtsToAssembleVec_.push_back(0);
+  HypreIntType t = 0;
+
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+  const stk::mesh::Selector s_owned = metaData.locally_owned_part()
+                                      & stk::mesh::selectUnion(parts)
+                                      & !(realm_.get_inactive_selector());
+  stk::mesh::BucketVector const& buckets = realm_.get_buckets(stk::topology::ELEM_RANK, s_owned);
+  for(size_t ib=0; ib<buckets.size(); ++ib) {
+    const stk::mesh::Bucket & b = *buckets[ib];
+    const stk::mesh::Bucket::size_type length   = b.size();
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      const unsigned numNodes = b.num_nodes(k);
+      t+=numNodes*numNodes*numDof_*numDof_;
+    }
+  }
+  numPtsToAssembleVec_.back()+=t;
+  numPtsToAssemble_+=t;
+  printf("Done %s %s %d : name=%s, numPts=%d, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)t,(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
 }
 
 void
 HypreLinearSystem::buildFaceElemToNodeGraph(
-  const stk::mesh::PartVector&)
+  const stk::mesh::PartVector & parts)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
   beginLinearSystemConstruction();
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+
+  /* Add a new entry to this vector */
+  numPtsToAssembleVec_.push_back(0);
+  HypreIntType t = 0;
+
+  stk::mesh::BulkData & bulkData = realm_.bulk_data();
+  stk::mesh::MetaData & metaData = realm_.meta_data();
+
+  const stk::mesh::Selector s_owned = metaData.locally_owned_part()
+    & stk::mesh::selectUnion(parts)
+    & !(realm_.get_inactive_selector());
+
+  stk::mesh::BucketVector const& face_buckets =
+    realm_.get_buckets( metaData.side_rank(), s_owned );
+
+  for(size_t ib=0; ib<face_buckets.size(); ++ib) {
+    const stk::mesh::Bucket & b = *face_buckets[ib];
+    const stk::mesh::Bucket::size_type length   = b.size();
+    for ( stk::mesh::Bucket::size_type k = 0 ; k < length ; ++k ) {
+      const stk::mesh::Entity face = b[k];
+
+      // extract the connected element to this exposed face; should be single in size!
+      const stk::mesh::Entity* face_elem_rels = bulkData.begin_elements(face);
+      ThrowAssert( bulkData.num_elements(face) == 1 );
+
+      // get connected element and nodal relations
+      stk::mesh::Entity element = face_elem_rels[0];
+      //const stk::mesh::Entity* elem_nodes = bulkData.begin_nodes(element);
+
+      // figure out the global dof ids for each dof on each node
+      const size_t numNodes = bulkData.num_nodes(element);
+
+      t+= (numNodes*numDof_)*(numNodes*numDof_);
+
+      //addConnections(elem_nodes, numNodes);
+    }
+  }
+  numPtsToAssembleVec_.back()+=t;
+  numPtsToAssemble_+=t;
+  printf("Done %s %s %d : name=%s, numPts=%d, numPtsToAssemble=%d, numDof=%d, numPtsToAssembleVec size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)t,(int)numPtsToAssemble_,numDof_,(int)numPtsToAssembleVec_.size());
 }
 
 void
@@ -242,7 +361,7 @@ void
 HypreLinearSystem::buildDirichletNodeGraph(
   const stk::mesh::PartVector& parts)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,(int)skippedRows_.size());
   beginLinearSystemConstruction();
 
   // Turn on the flag that indicates this linear system has rows that must be
@@ -261,14 +380,14 @@ HypreLinearSystem::buildDirichletNodeGraph(
       skippedRows_.insert(hid * numDof_);
     }
   }
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s, numPtsToAssemble=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,(int)skippedRows_.size());
 }
 
 void
 HypreLinearSystem::buildDirichletNodeGraph(
   const std::vector<stk::mesh::Entity>& nodeList)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, numPtsToAssemble=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,(int)skippedRows_.size());
   beginLinearSystemConstruction();
 
   // Turn on the flag that indicates this linear system has rows that must be
@@ -279,7 +398,7 @@ HypreLinearSystem::buildDirichletNodeGraph(
     HypreIntType hid = get_entity_hypre_id(node);
     skippedRows_.insert(hid * numDof_);
   }
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s, numPtsToAssemble=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssemble_,(int)skippedRows_.size());
 }
 
 void
@@ -304,7 +423,7 @@ HypreLinearSystem::finalizeLinearSystem()
   // At this stage the LHS and RHS data structures are ready for
   // sumInto/assembly.
   systemInitialized_ = true;
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s\n\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
 }
 
 void
@@ -351,6 +470,8 @@ HypreLinearSystem::loadComplete()
   HypreIntType hncols = 1;
   double getval;
   double setval = 1.0;
+  numUnfilledRows_=0;
+
   for (HypreIntType i=0; i < numRows_; i++) {
     if (rowFilled_[i] == RS_FILLED) continue;
     HypreIntType lid = iLower_ + i;
@@ -360,8 +481,10 @@ HypreLinearSystem::loadComplete()
       rows_.push_back(lid);
       cols_.push_back(lid);
       vals_.push_back(setval);
+      numUnfilledRows_++;
     }
   }
+  printf("Done %s %s %d : name=%s, numPtsToAssemble=%d, numUnfilledRows=%d, total=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(), (int)numPtsToAssemble_,(int)numUnfilledRows_,(int)(numPtsToAssemble_+numUnfilledRows_));
 
   loadCompleteSolver();
 
@@ -438,10 +561,6 @@ HypreLinearSystem::loadComplete()
   hmdfile.write((char*)&hmetaData[0], hmetaData.size() * sizeof(HypreIntType));
   hmdfile.close();
 
-  rows_.resize(0);
-  cols_.resize(0);
-  vals_.resize(0);
-
   printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
 }
 
@@ -476,6 +595,11 @@ HypreLinearSystem::zeroSystem()
   printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
   HypreDirectSolver* solver = reinterpret_cast<HypreDirectSolver*>(linearSolver_);
 
+  rows_.resize(0);
+  cols_.resize(0);
+  vals_.resize(0);
+  //numPtsToAssembleVec_.resize(0);
+  
   // It is unsafe to call IJMatrixInitialize multiple times without intervening
   // call to IJMatrixAssemble. This occurs during the first outer iteration (of
   // first timestep in static application and every timestep in moving mesh
@@ -506,6 +630,59 @@ HypreLinearSystem::zeroSystem()
     checkSkippedRows_ = true;
   printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
 }
+
+sierra::nalu::CoeffApplier* HypreLinearSystem::get_new_coeff_applier()
+{
+  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  if (!newHostCoeffApplier) {
+    printf("%s %s %d : name=%s numPtsToAssembleVec_ size=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)numPtsToAssembleVec_.size());
+    newHostCoeffApplier.reset(new HypreLinSysCoeffApplier(name_, numDof_, skippedRows_, numPtsToAssembleVec_));
+    newDeviceCoeffApplier = newHostCoeffApplier->device_pointer();
+  }
+  newHostCoeffApplier->resetInternalData();
+  
+  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  return newDeviceCoeffApplier;
+}
+
+KOKKOS_FUNCTION
+void
+HypreLinearSystem::HypreLinSysCoeffApplier::operator()(
+  unsigned numEntities,
+  const ngp::Mesh::ConnectedNodes& entities,
+  const SharedMemView<int*, DeviceShmem>& localIds,
+  const SharedMemView<int*, DeviceShmem>& sortPermutation,
+  const SharedMemView<const double*, DeviceShmem>& rhs,
+  const SharedMemView<const double**, DeviceShmem>& lhs,
+  const char* /*trace_tag*/)
+{
+
+}
+
+void HypreLinearSystem::HypreLinSysCoeffApplier::free_device_pointer()
+{
+#ifdef KOKKOS_ENABLE_CUDA
+  if (this != devicePointer_) {
+    sierra::nalu::kokkos_free_on_device(devicePointer_);
+    devicePointer_ = nullptr;
+  }
+#endif
+}
+
+sierra::nalu::CoeffApplier* HypreLinearSystem::HypreLinSysCoeffApplier::device_pointer()
+{
+#ifdef KOKKOS_ENABLE_CUDA
+  if (devicePointer_ != nullptr) {
+    sierra::nalu::kokkos_free_on_device(devicePointer_);
+    devicePointer_ = nullptr;
+  }
+  devicePointer_ = sierra::nalu::create_device_expression(*this);
+#else
+  devicePointer_ = this;
+#endif
+  return devicePointer_;
+}
+
 
 void
 HypreLinearSystem::sumInto(
@@ -633,7 +810,7 @@ HypreLinearSystem::applyDirichletBCs(
   const unsigned,
   const unsigned)
 {
-  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("%s %s %d : name=%s, list length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)rows_.size());
 
   auto& meta = realm_.meta_data();
 
@@ -672,7 +849,7 @@ HypreLinearSystem::applyDirichletBCs(
       }
     }
   }
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s, list length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)rows_.size());
 }
 
 HypreIntType
@@ -759,7 +936,7 @@ HypreLinearSystem::solve(stk::mesh::FieldBase* linearSolutionField)
   }
 
   eqSys_->firstTimeStepSolve_ = false;
-  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
+  printf("Done %s %s %d : name=%s\n\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str());
   return status;
 }
 

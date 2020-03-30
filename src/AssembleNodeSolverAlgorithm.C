@@ -60,6 +60,12 @@ AssembleNodeSolverAlgorithm::initialize_connectivity()
 void
 AssembleNodeSolverAlgorithm::execute()
 {
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
+  struct timeval start, stop;
+  double secs = 0;
+  gettimeofday(&start, NULL);
+
   // Handle transition period, it is likely that most of the user-requested
   // source terms were handled by the NGP version of nodal algorithm
   const size_t supplementalAlgSize = supplementalAlg_.size();
@@ -80,9 +86,15 @@ AssembleNodeSolverAlgorithm::execute()
   double *p_lhs = &lhs[0];
   double *p_rhs = &rhs[0];
 
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
+
   // supplemental algorithm size and setup
   for ( size_t i = 0; i < supplementalAlgSize; ++i )
     supplementalAlg_[i]->setup();
+
+  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+  eqSystem_->linsys_->printInfo();  
 
   // define some common selectors
   stk::mesh::Selector s_locally_owned_union = meta_data.locally_owned_part()
@@ -116,6 +128,11 @@ AssembleNodeSolverAlgorithm::execute()
 
     }
   }
+
+  eqSystem_->linsys_->printInfo();
+  gettimeofday(&stop, NULL);
+  secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
+  printf("Done %s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
 }
 
 } // namespace nalu

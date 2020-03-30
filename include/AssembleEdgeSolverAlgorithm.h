@@ -50,6 +50,13 @@ public:
   template<typename LambdaFunction>
   void run_algorithm(stk::mesh::BulkData& bulk, LambdaFunction lambdaFunc)
   {
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+    eqSystem_->linsys_->printInfo();
+    struct timeval start, stop;
+    double secs = 0;
+    gettimeofday(&start, NULL);
+    
+
     const auto& meta = bulk.mesh_meta_data();
     const auto& ngpMesh = realm_.ngp_mesh();
 
@@ -68,14 +75,12 @@ public:
     const auto rhsSize = rhsSize_;
 
     auto coeffApplier = coeff_applier();
+    auto newCoeffApplier = new_coeff_applier();
 
     const auto nodesPerEntity = nodesPerEntity_;
-    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
 
-    struct timeval start, stop;
-    double secs = 0;
-    gettimeofday(&start, NULL);
-    
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
+    eqSystem_->linsys_->printInfo();
     Kokkos::parallel_for(
       team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
         auto bktId = buckets.device_get(team.league_rank());
@@ -105,9 +110,10 @@ public:
           });
       });
 
+    eqSystem_->linsys_->printInfo();
     gettimeofday(&stop, NULL);
     secs = (double)(stop.tv_usec - start.tv_usec) / 1.e3 + 1.e3*((double)(stop.tv_sec - start.tv_sec));
-    printf("%s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
+    printf("Done %s %s %d : time taken=%1.5lf msecs\n",__FILE__,__FUNCTION__,__LINE__,secs);
   }
 
 protected:

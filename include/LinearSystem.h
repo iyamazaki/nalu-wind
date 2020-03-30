@@ -62,9 +62,9 @@ public:
                           const SharedMemView<const double*,DeviceShmem> & rhs,
                           const SharedMemView<const double**,DeviceShmem> & lhs,
                           const char * trace_tag) = 0;
-
   virtual void free_device_pointer() = 0;
   virtual CoeffApplier* device_pointer() = 0;
+  virtual void resetInternalData() {};
 };
 
 class LinearSystem
@@ -165,6 +165,13 @@ public:
     return nullptr;
 #endif
   }
+
+  virtual CoeffApplier* get_new_coeff_applier()
+  {
+    return nullptr;
+  }
+
+  virtual void printInfo() {}
 
   virtual void sumInto(
     unsigned numEntities,
