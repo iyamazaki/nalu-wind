@@ -859,41 +859,43 @@ HypreLinearSystem::HypreLinSysCoeffApplier::HypreLinSysCoeffApplier(std::string 
   mat_partitionStart_ = Kokkos::View<HypreIntType *>("rows",numPartitions_);
   rhs_partitionStart_ = Kokkos::View<HypreIntType *>("rows",numPartitions_);
   for (unsigned i=0; i<numPartitions_; ++i) {
-    rhs_count_[i] = sqrt(mat_count_[i]);
-    numMatPtsToAssembleTotal_ += partitionCount_[i]*mat_count_[i];
-    numRhsPtsToAssembleTotal_ += partitionCount_[i]*rhs_count_[i];
-    mat_partitionStart_[i] = numMatPtsToAssembleTotal_ - partitionCount_[i]*mat_count_[i];
-    rhs_partitionStart_[i] = numRhsPtsToAssembleTotal_ - partitionCount_[i]*rhs_count_[i];
+    rhs_count_(i) = sqrt(mat_count_(i));
+    numMatPtsToAssembleTotal_ += partitionCount_(i)*mat_count_(i);
+    numRhsPtsToAssembleTotal_ += partitionCount_(i)*rhs_count_(i);
+    mat_partitionStart_(i) = numMatPtsToAssembleTotal_ - partitionCount_(i)*mat_count_(i);
+    rhs_partitionStart_(i) = numRhsPtsToAssembleTotal_ - partitionCount_(i)*rhs_count_(i);
     printf("%d : total=%d, partitionCount=%d, count=%d, partitionStart=%d\n",
-	   i,(int)numMatPtsToAssembleTotal_,(int)partitionCount_[i],(int)mat_count_[i],(int)mat_partitionStart_[i]);
+	   i,(int)numMatPtsToAssembleTotal_,(int)partitionCount_(i),(int)mat_count_(i),(int)mat_partitionStart_(i));
   }      
 
   /* storage for the matrix lists */
   rows_ = Kokkos::View<HypreIntType *>("rows",numMatPtsToAssembleTotal_ + numRows_);
   cols_ = Kokkos::View<HypreIntType *>("cols",numMatPtsToAssembleTotal_ + numRows_);
   vals_ = Kokkos::View<double *>("vals",numMatPtsToAssembleTotal_ + numRows_);
-  Kokkos::parallel_for("initLists", numMatPtsToAssembleTotal_, KOKKOS_LAMBDA (const int& i) {
+  Kokkos::parallel_for("initLists", numMatPtsToAssembleTotal_, KOKKOS_LAMBDA (const unsigned& i) {
       /* initialize to the dummy value -1 so that row and cols entries in the list that aren't "filled in"
 	 are easily ignored during the full assembly process */
-      rows_[i] = -1;
-      cols_[i] = -1;
-      vals_[i] = 0.;
+      rows_(i) = -1;
+      cols_(i) = -1;
+      vals_(i) = 0.;
     });
 
   /* storage for the rhs lists */
-  rhsRows_ = Kokkos::View<HypreIntType *>("rhsRows",numRhsPtsToAssembleTotal_ + numRows_);
-  rhsVals_ = Kokkos::View<double *>("rhsVvals",numRhsPtsToAssembleTotal_ + numRows_);
-  Kokkos::parallel_for("initLists", numRhsPtsToAssembleTotal_, KOKKOS_LAMBDA (const int& i) {
+  rhsRows_ = Kokkos::View<HypreIntType **>("rhsRows", numDof_, numRhsPtsToAssembleTotal_ + numRows_);
+  rhsVals_ = Kokkos::View<double **>("rhsVals", numDof_, numRhsPtsToAssembleTotal_ + numRows_);
+  Kokkos::parallel_for("initLists", numRhsPtsToAssembleTotal_, KOKKOS_LAMBDA (const unsigned& i) {
       /* initialize to the dummy value -1 so that row and cols entries in the list that aren't "filled in"
 	 are easily ignored during the full assembly process */
-      rhsRows_[i] = -1;
-      rhsVals_[i] = 0.;
+      for (unsigned j=0; j<numDof_; ++j) {
+	rhsRows_(j,i) = -1;
+	rhsVals_(j,i) = 0.;
+      }
     });
 
   /* initialize the row filled status vector */
   rowFilled_ = Kokkos::View<RowFillStatus*>("rowFilled",numRows_);  
-  Kokkos::parallel_for("initRowFilled", numRows_, KOKKOS_LAMBDA (const int& i) {
-      rowFilled_[i] = RS_UNFILLED;
+  Kokkos::parallel_for("initRowFilled", numRows_, KOKKOS_LAMBDA (const unsigned& i) {
+      rowFilled_(i) = RS_UNFILLED;
     });
 
   /* create the mirror ... need for the bc hack */
@@ -945,22 +947,22 @@ HypreLinearSystem::HypreLinSysCoeffApplier::operator()(
       if (skippedRowsMap_.exists(hid)) continue;
     }
     for (unsigned d=0; d < numDof_; d++) {
-      int ir = ix + d;
+      unsigned ir = ix + d;
       HypreIntType lid = localIds[ir];
       const double* cur_lhs = &lhs(ir, 0);
 
       /* fill the matrix values */
-      for (int k=0; k<numRows; ++k) {
-	rows_[matIndex+i*numRows+k] = lid;
-	cols_[matIndex+i*numRows+k] = localIds[k];
-	vals_[matIndex+i*numRows+k] = cur_lhs[k];
+      for (unsigned k=0; k<numRows; ++k) {
+	rows_(matIndex+i*numRows+k) = lid;
+	cols_(matIndex+i*numRows+k) = localIds[k];
+	vals_(matIndex+i*numRows+k) = cur_lhs[k];
       }
       /* fill the right hand side values */
-      rhsRows_[rhsIndex+i] = lid;
-      rhsVals_[rhsIndex+i] = rhs[ir];
+      rhsRows_(0,rhsIndex+i) = lid;
+      rhsVals_(0,rhsIndex+i) = rhs[ir];
 
       if ((lid >= iLower_) && (lid <= iUpper_))
-        rowFilled_[lid - iLower_] = RS_FILLED;
+        rowFilled_(lid - iLower_) = RS_FILLED;
     }
   }
 }
@@ -986,15 +988,17 @@ void HypreLinearSystem::HypreLinSysCoeffApplier::dumpData(const int di) {
   vfile.write((char*)&vals_[0], matCount * sizeof(double));
   vfile.close();
 
-  sprintf(fname,"%s_CoeffApplier_rhsRowIndices%d_0.bin",name_.c_str(),di);
-  std::ofstream rrfile(fname, std::ios::out | std::ios::binary);
-  rrfile.write((char*)&rhsRows_[0], rhsCount * sizeof(HypreIntType));
-  rrfile.close();
-
-  sprintf(fname,"%s_CoeffApplier_rhsValues%d_0.bin",name_.c_str(),di);
-  std::ofstream vvfile(fname, std::ios::out | std::ios::binary);
-  vvfile.write((char*)&rhsVals_[0], rhsCount * sizeof(double));
-  vvfile.close();
+  for (unsigned j=0; j<numDof_; ++j) {
+    sprintf(fname,"%s_CoeffApplier_rhsRowIndices%d_%u.bin",name_.c_str(),di,j);
+    std::ofstream rrfile(fname, std::ios::out | std::ios::binary);
+    rrfile.write((char*)&rhsRows_(j,0), rhsCount * sizeof(HypreIntType));
+    rrfile.close();
+    
+    sprintf(fname,"%s_CoeffApplier_rhsValues%d_%u.bin",name_.c_str(),di,j);
+    std::ofstream vvfile(fname, std::ios::out | std::ios::binary);
+    vvfile.write((char*)&rhsVals_(j,0), rhsCount * sizeof(double));
+    vvfile.close();
+  }
 
   std::vector<HypreIntType> metaData(0);
   metaData.push_back((HypreIntType)iLower_);
@@ -1057,11 +1061,11 @@ HypreLinearSystem::HypreLinSysCoeffApplier::applyDirichletBCs(Realm & realm,
     const double* bcValues = (double*)stk::mesh::field_data(
       *bcValuesField, *b);
 
-    for (size_t in=0; in < b->size(); in++) {
+    for (unsigned in=0; in < b->size(); in++) {
       auto node = (*b)[in];
       HypreIntType hid = *stk::mesh::field_data(*realm.hypreGlobalId_, node);
 
-      for (size_t d=0; d<numDof_; d++) {
+      for (unsigned d=0; d<numDof_; d++) {
         HypreIntType lid = hid * numDof_ + d;
         double bcval = bcValues[in*numDof_ + d] - solution[in*numDof_ + d];
 
@@ -1108,14 +1112,14 @@ HypreLinearSystem::HypreLinSysCoeffApplier::applyDirichletBCs(Realm & realm,
   Kokkos::deep_copy(rv,rvh);
 
   /* Step 6 : append this to the existing data structure */
-  Kokkos::parallel_for("bcHack", tRows.size(), KOKKOS_LAMBDA (const int& i) {
+  Kokkos::parallel_for("bcHack", tRows.size(), KOKKOS_LAMBDA (const unsigned& i) {
       int matIndex = Kokkos::atomic_fetch_add(&mat_atomic_counter_(), 1);
       int rhsIndex = Kokkos::atomic_fetch_add(&rhs_atomic_counter_(), 1);
-      rows_[matIndex]=r[i];
-      cols_[matIndex]=c[i];
-      vals_[matIndex]=v[i];
-      rhsRows_[rhsIndex] = rr[i];
-      rhsVals_[rhsIndex] = rv[i];
+      rows_(matIndex)=r[i];
+      cols_(matIndex)=c[i];
+      vals_(matIndex)=v[i];
+      rhsRows_(0,rhsIndex) = rr[i];
+      rhsVals_(0,rhsIndex) = rv[i];
     });
 
 #else
@@ -1149,15 +1153,15 @@ HypreLinearSystem::HypreLinSysCoeffApplier::applyDirichletBCs(Realm & realm,
       double diag_value = 1.0;
       printf("hid=%d\n",(int)hid);
       
-      for (size_t d=0; d<numDof_; d++) {
+      for (unsigned d=0; d<numDof_; d++) {
         HypreIntType lid = hid * numDof_ + d;
         const double bc_residual = ngpBCValuesField.get(meshIdx, d) - ngpSolutionField.get(meshIdx, d);
-	rows_[matIndex+d] = lid;
-	cols_[matIndex+d] = lid;
-	vals_[matIndex+d] = diag_value;
-	rhsRows_[rhsIndex+d] = lid;
-	rhsVals_[rhsIndex+d] = bc_residual;
-	rowFilled_[lid - iLower_] = RS_FILLED;
+	rows_(matIndex+d) = lid;
+	cols_(matIndex+d) = lid;
+	vals_(matIndex+d) = diag_value;
+	rhsRows_(d,rhsIndex) = lid;
+	rhsVals_(d,rhsIndex) = bc_residual;
+	rowFilled_(lid - iLower_) = RS_FILLED;
 	
       }
     }
@@ -1174,18 +1178,23 @@ HypreLinearSystem::HypreLinSysCoeffApplier::finishAssembly() {
 	 __FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)mat_atomic_counter_());
 
   /* initialize the row filled status vector */
-  Kokkos::parallel_for("unfilledRows", numRows_, KOKKOS_LAMBDA (const int& i) {
+  Kokkos::parallel_for("unfilledRows", numRows_, KOKKOS_LAMBDA (const unsigned& i) {
       if (rowFilled_[i]==RS_UNFILLED) {
 	int matIndex = Kokkos::atomic_fetch_add(&mat_atomic_counter_(), 1);
 	int rhsIndex = Kokkos::atomic_fetch_add(&rhs_atomic_counter_(), 1);
 	HypreIntType lid = iLower_ + i;
-	rows_[matIndex] = lid;
-	cols_[matIndex] = lid;
-	vals_[matIndex] = 1.0;
-	rhsRows_[rhsIndex] = lid;
-	rhsVals_[rhsIndex] = 0.0;
+	rows_(matIndex) = lid;
+	cols_(matIndex) = lid;
+	vals_(matIndex) = 1.0;
+	for (unsigned d=0; d<numDof_; ++d) {
+	  rhsRows_(d,rhsIndex) = lid;
+	  rhsVals_(d,rhsIndex) = 0.0;
+	}
       }
     }); 
+
+  /* Reset after assembly */
+  partitionIndex_=-1;
 
   printf("Done %s %s %d : name=%s : mat_atomic_counter_()=%d\n",
 	 __FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)mat_atomic_counter_());
@@ -1202,8 +1211,8 @@ HypreLinearSystem::HypreLinSysCoeffApplier::resetInternalData() {
     if (partitionIndex_==0) {
       mat_atomic_counter_() = 0;
       rhs_atomic_counter_() = 0;
-      Kokkos::parallel_for("resetRowFilled", numRows_, KOKKOS_LAMBDA (const int& i) {
-	  rowFilled_[i] = RS_UNFILLED;
+      Kokkos::parallel_for("resetRowFilled", numRows_, KOKKOS_LAMBDA (const unsigned& i) {
+	  rowFilled_(i) = RS_UNFILLED;
 	});
     }
     printf("Done %s %s %d : name=%s : partitionIndex_=%d, mat_atomic_counter_()=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),partitionIndex_,(int)mat_atomic_counter_());

@@ -226,9 +226,9 @@ public:
     //! list for the values ... later to be assembled to the CSR matrix in Hypre
     Kokkos::View<double*> vals_;
     //! list for the rhs row indices ... later to be assembled to the rhs vector in Hypre
-    Kokkos::View<HypreIntType*> rhsRows_;
+    Kokkos::View<HypreIntType**> rhsRows_;
     //! list for the rhs values ... later to be assembled to the rhs vector in Hypre
-    Kokkos::View<double*> rhsVals_;
+    Kokkos::View<double**> rhsVals_;
 
     //! Flags indicating whether a particular row in the HYPRE matrix has been filled or not.
     enum RowFillStatus

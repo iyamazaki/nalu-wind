@@ -593,16 +593,16 @@ HypreUVWLinearSystem::HypreUVWLinSysCoeffApplier::operator()(
 
     int offset = 0;
     for (unsigned k=0; k<numEntities; ++k) {
-      rows_[matIndex+i*numEntities+k] = hid;
-      cols_[matIndex+i*numEntities+k] = localIds[k];
-      vals_[matIndex+i*numEntities+k] = lhs(ix, offset);
+      rows_(matIndex+i*numEntities+k) = hid;
+      cols_(matIndex+i*numEntities+k) = localIds[k];
+      vals_(matIndex+i*numEntities+k) = lhs(ix, offset);
       offset += nDim_;
     }
 
     for (unsigned d=0; d < nDim_; ++d) {
       int ir = ix + d;
-      //rhsRows_[d][rhsIndex+i] = hid;
-      //rhsVals_[d][rhsIndex+i] = rhs[ir];
+      rhsRows_(d,rhsIndex+i) = hid;
+      rhsVals_(d,rhsIndex+i) = rhs[ir];
     }
 
     if ((hid >= iLower_) && (hid <= iUpper_))
