@@ -105,8 +105,9 @@ AssembleFaceElemSolverAlgorithm::execute()
   const unsigned numDof = numDof_;
   double diagRelaxFactor = diagRelaxFactor_;
 
-  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
   eqSystem_->linsys_->printInfo();  
+  printf("%s %s %d : Equation System %s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
+
   run_face_elem_algorithm(realm_.bulk_data(),
     KOKKOS_LAMBDA(sierra::nalu::SharedMemData_FaceElem<DeviceTeamHandleType,DeviceShmem> &smdata)
     {
@@ -133,6 +134,12 @@ AssembleFaceElemSolverAlgorithm::execute()
 
           coeffApplier(nodesPerEntity, smdata.ngpConnectedNodes[simdIndex],
                       smdata.scratchIds, smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+
+	  if (eqSystem_->name_=="ContinuityEQS" || eqSystem_->name_=="WallDistEQS"
+	    || eqSystem_->name_=="TurbKineticEnergyEQS"|| eqSystem_->name_=="MomentumEQS") {
+	    newCoeffApplier(nodesPerEntity, smdata.ngpConnectedNodes[simdIndex], smdata.scratchIds,
+			    smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+	  }
         }
     });
   eqSystem_->linsys_->printInfo();

@@ -32,6 +32,83 @@ public:
 
   virtual void zeroSystem();
 
+  // Graph/Matrix Construction
+  virtual void buildNodeGraph(const stk::mesh::PartVector & parts);// for nodal assembly (e.g., lumped mass and source)
+  virtual void buildFaceToNodeGraph(const stk::mesh::PartVector & parts);// face->node assembly
+  virtual void buildEdgeToNodeGraph(const stk::mesh::PartVector & parts);// edge->node assembly
+  virtual void buildElemToNodeGraph(const stk::mesh::PartVector & parts);// elem->node assembly
+  virtual void buildReducedElemToNodeGraph(const stk::mesh::PartVector&);// elem (nearest nodes only)->node assembly
+  virtual void buildFaceElemToNodeGraph(const stk::mesh::PartVector & parts);// elem:face->node assembly
+  virtual void buildNonConformalNodeGraph(const stk::mesh::PartVector&);// nonConformal->elem_node assembly
+  //virtual void buildOversetNodeGraph(const stk::mesh::PartVector&);// overset->elem_node assembly
+
+  /** Tag rows that must be handled as a Dirichlet BC node
+   *
+   *  @param[in] partVec List of parts that contain the Dirichlet nodes
+   */
+  virtual void buildDirichletNodeGraph(const stk::mesh::PartVector&);
+
+  /** Tag rows that must be handled as a Dirichlet  node
+   *
+   *  @param[in] entities List of nodes where Dirichlet conditions are applied
+   *
+   *  \sa sierra::nalu::FixPressureAtNodeAlgorithm
+   */
+  virtual void buildDirichletNodeGraph(const std::vector<stk::mesh::Entity>&);
+  virtual void buildDirichletNodeGraph(const ngp::Mesh::ConnectedNodes);
+
+  //sierra::nalu::CoeffApplier* get_coeff_applier();
+  virtual CoeffApplier* get_new_coeff_applier();
+
+  /***************************************************************************************************/
+  /*                     Beginning of HypreLinSysCoeffApplier definition                             */
+  /***************************************************************************************************/
+
+  class HypreUVWLinSysCoeffApplier : public HypreLinSysCoeffApplier
+  {
+  public:
+
+    HypreUVWLinSysCoeffApplier(std::string name, unsigned numDof,
+			       unsigned numPartitions, HypreIntType maxRowID,
+			       HypreIntType iLower, HypreIntType iUpper,
+			       HypreIntType jLower, HypreIntType jUpper,
+			       Kokkos::View<HypreIntType *> partitionCount,
+			       Kokkos::View<HypreIntType *> mat_count,
+			       EntityToHypreIntTypeView entityToLID,
+			       Kokkos::UnorderedMap<HypreIntType,HypreIntType> skippedRowsMap);
+
+    ~HypreUVWLinSysCoeffApplier() {}
+
+    KOKKOS_FUNCTION
+    virtual void resetRows(unsigned,
+                           const stk::mesh::Entity*,
+                           const unsigned,
+                           const unsigned,
+                           const double,
+                           const double) { checkSkippedRows_=false; }
+
+    KOKKOS_FUNCTION
+    virtual void operator()(unsigned numEntities,
+                            const ngp::Mesh::ConnectedNodes& entities,
+                            const SharedMemView<int*,DeviceShmem> & localIds,
+                            const SharedMemView<int*,DeviceShmem> & sortPermutation,
+                            const SharedMemView<const double*,DeviceShmem> & rhs,
+                            const SharedMemView<const double**,DeviceShmem> & lhs,
+                            const char * trace_tag);
+
+    virtual void applyDirichletBCs(Realm & realm, 
+				   stk::mesh::FieldBase * solutionField,
+				   stk::mesh::FieldBase * bcValuesField,
+				   const stk::mesh::PartVector& parts);
+    unsigned nDim_;
+  };
+
+  /***************************************************************************************************/
+  /*                        End of of HypreLinSysCoeffApplier definition                             */
+  /***************************************************************************************************/
+
+
+
   /** Update coefficients of a particular row(s) in the linear system
    *
    *  The core method of this class, it updates the matrix and RHS based on the
@@ -125,6 +202,7 @@ private:
   mutable std::vector<HYPRE_IJVector> sln_;
 
   const int nDim_{3};
+
 };
 
 }  // nalu

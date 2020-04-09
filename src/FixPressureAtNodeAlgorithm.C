@@ -50,14 +50,16 @@ FixPressureAtNodeAlgorithm::~FixPressureAtNodeAlgorithm()
 void
 FixPressureAtNodeAlgorithm::initialize_connectivity()
 {
+  printf("%s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
+  if (doInit_)
+    initialize();
   eqSystem_->linsys_->buildDirichletNodeGraph(refNodeList_);
+  printf("Done %s %s %d : name=%s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
 }
 
 void
 FixPressureAtNodeAlgorithm::execute()
 {
-  if (doInit_)
-    initialize();
 
   int numNodes = refNodeList_.size();
   ThrowAssertMsg(numNodes <= 1,
@@ -70,6 +72,7 @@ FixPressureAtNodeAlgorithm::execute()
 
   // Reset LHS and RHS for this matrix
   CoeffApplier* deviceCoeffApplier = eqSystem_->linsys_->get_coeff_applier();
+  CoeffApplier* newDeviceCoeffApplier = eqSystem_->linsys_->get_new_coeff_applier();
  
   ngp::Mesh ngpMesh = realm_.ngp_mesh();
   NGPDoubleFieldType ngpPressure = realm_.ngp_field_manager().get_field<double>(pressure_->mesh_meta_data_ordinal());
@@ -97,6 +100,7 @@ FixPressureAtNodeAlgorithm::execute()
     {
       ngp::Mesh::ConnectedNodes refNodeList(&targetNode, 1);
       deviceCoeffApplier->resetRows(1, &targetNode, 0, 1);
+      newDeviceCoeffApplier->resetRows(1, &targetNode, 0, 1);
   
       // Fix the pressure for this node only if this is proc is owner
       if (numNodes > 0 && fixPressureNode) {
@@ -107,6 +111,10 @@ FixPressureAtNodeAlgorithm::execute()
         rhs(0) = refPressure - pressureN;
   
         (*deviceCoeffApplier)(refNodeList.size(), refNodeList, scratchIds, sortPerm, rhs, lhs, __FILE__);
+
+	if (eqSystem_->name_=="ContinuityEQS" || eqSystem_->name_=="WallDistEQS" || eqSystem_->name_=="TurbKineticEnergyEQS") {
+	  (*newDeviceCoeffApplier)(refNodeList.size(), refNodeList, scratchIds, sortPerm, rhs, lhs, __FILE__);
+	}
       }
     });
   });

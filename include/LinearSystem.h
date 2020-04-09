@@ -62,9 +62,16 @@ public:
                           const SharedMemView<const double*,DeviceShmem> & rhs,
                           const SharedMemView<const double**,DeviceShmem> & lhs,
                           const char * trace_tag) = 0;
+
   virtual void free_device_pointer() = 0;
   virtual CoeffApplier* device_pointer() = 0;
   virtual void resetInternalData() {};
+  virtual void dumpData(const int) {};
+  virtual void applyDirichletBCs(Realm &,
+				 stk::mesh::FieldBase *,
+				 stk::mesh::FieldBase *,
+				 const stk::mesh::PartVector&) {};
+  virtual void finishAssembly() {};
 };
 
 class LinearSystem
@@ -168,6 +175,7 @@ public:
 
   virtual CoeffApplier* get_new_coeff_applier()
   {
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
     return nullptr;
   }
 

@@ -79,8 +79,9 @@ public:
 
     const auto nodesPerEntity = nodesPerEntity_;
 
-    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
     eqSystem_->linsys_->printInfo();
+    printf("%s %s %d : Equation System %s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
+
     Kokkos::parallel_for(
       team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
         auto bktId = buckets.device_get(team.league_rank());
@@ -92,6 +93,7 @@ public:
         Kokkos::parallel_for(
           Kokkos::TeamThreadRange(team, bktLen),
           [&](const size_t& bktIndex) {
+	    
             auto edge = b[bktIndex];
             const auto edgeIndex = ngpMesh.fast_mesh_index(edge);
             smdata.ngpElemNodes = ngpMesh.get_nodes(entityRank, edgeIndex);
@@ -107,6 +109,12 @@ public:
             coeffApplier(
               nodesPerEntity, smdata.ngpElemNodes, smdata.scratchIds,
               smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+
+	    if (eqSystem_->name_=="ContinuityEQS" || eqSystem_->name_=="WallDistEQS"
+		|| eqSystem_->name_=="TurbKineticEnergyEQS"|| eqSystem_->name_=="MomentumEQS") {
+	      newCoeffApplier(nodesPerEntity, smdata.ngpElemNodes, smdata.scratchIds,
+			      smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+	    }
           });
       });
 

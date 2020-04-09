@@ -27,6 +27,8 @@
 namespace sierra {
 namespace nalu {
 
+using EntityToHypreIntTypeView = Kokkos::View<HypreIntType*, Kokkos::LayoutRight, LinSysMemSpace>;
+
 /** Nalu interface to populate a Hypre Linear System
  *
  *  This class provides an interface to the HYPRE IJMatrix and IJVector data
@@ -40,15 +42,30 @@ namespace nalu {
 class HypreLinearSystem : public LinearSystem
 {
 public:
+  std::string name_;
+  int numAssembles_;
+  HypreIntType numUnfilledRows_;
+
   /* data structures for accumulating the matrix elements */
   std::vector<HypreIntType> rows_;
   std::vector<HypreIntType> cols_;
   std::vector<double> vals_;
-  std::string name_;
-  int numAssembles_;
-  std::vector<HypreIntType> numPtsToAssembleVec_;
-  HypreIntType numPtsToAssemble_;
-  HypreIntType numUnfilledRows_;
+  std::vector<std::vector<HypreIntType> > rhsRows_;
+  std::vector<std::vector<double> > rhsVals_;
+
+  std::vector<HypreIntType> partitionCount_;
+  std::vector<HypreIntType> count_;
+
+  EntityToHypreIntTypeView entityToLID_;
+  void fill_entity_to_row_mapping();
+
+  HypreIntType numDataPtsToAssemble() {
+    HypreIntType n=0;
+    for (unsigned i=0; i<partitionCount_.size(); ++i) {
+      n+=partitionCount_[i]*count_[i];
+    }
+    return n;
+  }
 
   // Quiet "partially overridden" compiler warnings.
   using LinearSystem::buildDirichletNodeGraph;
@@ -77,105 +94,6 @@ public:
   virtual void buildOversetNodeGraph(const stk::mesh::PartVector&);// overset->elem_node assembly
   virtual void finalizeLinearSystem();
 
-  //sierra::nalu::CoeffApplier* get_coeff_applier();
-
-  sierra::nalu::CoeffApplier* get_new_coeff_applier();
-
-  std::unique_ptr<CoeffApplier> newHostCoeffApplier;
-  CoeffApplier* newDeviceCoeffApplier = nullptr;
-
-
-  virtual void printInfo() {
-    printf("%s %s %d : name=%s, list length=%d, skipped length=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)rows_.size(),(int)skippedRows_.size());
-  }
-
-  class HypreLinSysCoeffApplier : public CoeffApplier
-  {
-  public:
-    KOKKOS_FUNCTION
-    HypreLinSysCoeffApplier(std::string name, unsigned numDof,
-			    std::unordered_set<HypreIntType> & skippedRows,
-			    std::vector<HypreIntType> numPtsToAssembleVec)
-      : name_(name), numDof_(numDof),
-	skippedRows_(skippedRows),
-	numPtsToAssembleVec_(numPtsToAssembleVec),
-	devicePointer_(nullptr)
-    {
-      printf("%s %s %d : name=%s : numDof_=%d, numPtsToAssemble=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),numDof_,(int)numPtsToAssemble_);
-
-      /* set key internal data */
-      counter_=-1;
-      numPtsToAssemble_=0;
-      numPartitions_=numPtsToAssembleVec_.size();
-
-      for (unsigned i=0; i<numPartitions_; ++i) {
-	numPtsToAssemble_+=numPtsToAssembleVec_[i];
-	printf("%d : %d %d\n",i,(int)numPtsToAssembleVec_[i],(int)numPtsToAssemble_);
-      }
-      
-
-      rows_ = Kokkos::View<HypreIntType *>("rows",numPtsToAssemble_);
-      cols_ = Kokkos::View<HypreIntType *>("cols",numPtsToAssemble_);
-      vals_ = Kokkos::View<double *>("vals",numPtsToAssemble_);
-      Kokkos::parallel_for("init", numPtsToAssemble_, KOKKOS_LAMBDA (const int& i) {
-	  /* initialize to the dummy value -1 so that row and cols entries in the list that aren't "filled in"
-	     are easily ignored during the full assembly process */
-	  rows_[i] = -1;
-	  cols_[i] = -1;
-	  vals_[i] = 0.;
-	});
-
-      printf("Done %s %s %d : name=%s : numDof_=%d, numPtsToAssemble=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),numDof_,(int)numPtsToAssemble_);
-    }
-
-    KOKKOS_FUNCTION
-    ~HypreLinSysCoeffApplier() {}
-
-    KOKKOS_FUNCTION
-    virtual void resetRows(unsigned numNodes,
-                           const stk::mesh::Entity* nodeList,
-                           const unsigned beginPos,
-                           const unsigned endPos,
-                           const double diag_value = 0.0,
-                           const double rhs_residual = 0.0) {}
-
-    KOKKOS_FUNCTION
-    virtual void operator()(unsigned numEntities,
-                            const ngp::Mesh::ConnectedNodes& entities,
-                            const SharedMemView<int*,DeviceShmem> & localIds,
-                            const SharedMemView<int*,DeviceShmem> & sortPermutation,
-                            const SharedMemView<const double*,DeviceShmem> & rhs,
-                            const SharedMemView<const double**,DeviceShmem> & lhs,
-                            const char * trace_tag);
-
-    virtual void resetInternalData() { 
-      printf("%s %s %d : name=%s : counter_=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),counter_);
-      counter_++;
-      counter_= (counter_%numPartitions_);
-      printf("%s %s %d : name=%s : counter_=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),counter_);
-    }
-
-    void free_device_pointer();
-
-    sierra::nalu::CoeffApplier* device_pointer();
-
-  private:
-    std::string name_;
-    unsigned numDof_=0;
-    /* initialize counter_ to -1 .Then, the first call to get_coeff_applier (get_new_coeff_applier) will bump it to 0.
-       Subsequent calls will bump it by 1 (mod numPartitions_) */
-    int counter_=-1;
-    unsigned numPartitions_=0;
-    std::unordered_set<HypreIntType> skippedRows_;
-    std::vector<HypreIntType> numPtsToAssembleVec_;
-    HypreIntType numPtsToAssemble_=0;
-    HypreLinSysCoeffApplier* devicePointer_;
-    Kokkos::View<HypreIntType*> rows_;
-    Kokkos::View<HypreIntType*> cols_;
-    Kokkos::View<double*> vals_;
-  };
-
-
   /** Tag rows that must be handled as a Dirichlet BC node
    *
    *  @param[in] partVec List of parts that contain the Dirichlet nodes
@@ -189,6 +107,148 @@ public:
    *  \sa sierra::nalu::FixPressureAtNodeAlgorithm
    */
   virtual void buildDirichletNodeGraph(const std::vector<stk::mesh::Entity>&);
+  virtual void buildDirichletNodeGraph(const ngp::Mesh::ConnectedNodes);
+
+  //sierra::nalu::CoeffApplier* get_coeff_applier();
+  virtual CoeffApplier* get_new_coeff_applier();
+
+  std::unique_ptr<CoeffApplier> newHostCoeffApplier;
+  CoeffApplier* newDeviceCoeffApplier = nullptr;
+
+  virtual void printInfo() {
+    int numUnfilledRows=0;
+
+    for (HypreIntType i=0; i < numRows_; i++) {
+      if (rowFilled_[i] == RS_FILLED) continue;
+      else numUnfilledRows++;
+    }
+
+    printf("%s %s %d : name=%s, list length=%d, skipped length=%d, numUnfilledRows=%d\n",__FILE__,__FUNCTION__,__LINE__,name_.c_str(),(int)rows_.size(),(int)skippedRows_.size(),(int)numUnfilledRows);
+  }
+
+
+  /***************************************************************************************************/
+  /*                     Beginning of HypreLinSysCoeffApplier definition                             */
+  /***************************************************************************************************/
+
+  class HypreLinSysCoeffApplier : public CoeffApplier
+  {
+  public:
+
+    HypreLinSysCoeffApplier(std::string name, unsigned numDof,
+			    unsigned numPartitions, HypreIntType maxRowID,
+			    HypreIntType iLower, HypreIntType iUpper,
+			    HypreIntType jLower, HypreIntType jUpper,
+			    Kokkos::View<HypreIntType *> partitionCount,
+			    Kokkos::View<HypreIntType *> mat_count,
+			    EntityToHypreIntTypeView entityToLID,
+			    Kokkos::UnorderedMap<HypreIntType,HypreIntType> skippedRowsMap);
+
+    ~HypreLinSysCoeffApplier() {}
+
+    KOKKOS_FUNCTION
+    virtual void resetRows(unsigned,
+                           const stk::mesh::Entity*,
+                           const unsigned,
+                           const unsigned,
+                           const double,
+                           const double) { checkSkippedRows_=false; }
+
+    KOKKOS_FUNCTION
+    virtual void operator()(unsigned numEntities,
+                            const ngp::Mesh::ConnectedNodes& entities,
+                            const SharedMemView<int*,DeviceShmem> & localIds,
+                            const SharedMemView<int*,DeviceShmem> & sortPermutation,
+                            const SharedMemView<const double*,DeviceShmem> & rhs,
+                            const SharedMemView<const double**,DeviceShmem> & lhs,
+                            const char * trace_tag);
+
+    void free_device_pointer();
+
+    sierra::nalu::CoeffApplier* device_pointer();
+
+    virtual void resetInternalData();
+
+    virtual void dumpData(const int di);
+
+    virtual void applyDirichletBCs(Realm & realm, 
+				   stk::mesh::FieldBase * solutionField,
+				   stk::mesh::FieldBase * bcValuesField,
+				   const stk::mesh::PartVector& parts);
+
+    virtual void finishAssembly();
+
+  protected:
+    
+    //! name of the equation system using this coeff applier class
+    std::string name_="";
+    //! number of degrees of freedom
+    unsigned numDof_=0;
+    //! number of partitions ... i.e. the number Assemble*Solver calls that write to this set of lists/matrix.
+    unsigned numPartitions_=0;
+    //! Maximum Row ID in the Hypre linear system
+    HypreIntType maxRowID_;
+    //! The lowest row owned by this MPI rank
+    HypreIntType iLower_=0;
+    //! The highest row owned by this MPI rank
+    HypreIntType iUpper_=0;
+    //! The lowest column owned by this MPI rank; currently jLower_ == iLower_
+    HypreIntType jLower_=0;
+    //! The highest column owned by this MPI rank; currently jUpper_ == iUpper_
+    HypreIntType jUpper_=0;
+    //! need to document this
+    Kokkos::View<HypreIntType *> partitionCount_;
+    //! need to document this
+    Kokkos::View<HypreIntType *> mat_count_;
+    //! A way to map the entity local offset to the hypre id
+    EntityToHypreIntTypeView entityToLID_;
+    //! unordered map for skipped rows
+    Kokkos::UnorderedMap<HypreIntType,HypreIntType> skippedRowsMap_;
+
+    //! this is the pointer to the device function ... that assembles the lists
+    HypreLinSysCoeffApplier* devicePointer_;
+
+    /* initialize partitionIndex_ to -1 .Then, the first call to get_coeff_applier (get_new_coeff_applier) will bump it to 0.
+       Subsequent calls will bump it by 1 (mod numPartitions_) */
+    int partitionIndex_=-1;
+    Kokkos::View<HypreIntType *> rhs_count_;
+    Kokkos::View<HypreIntType> mat_atomic_counter_;
+    Kokkos::View<HypreIntType> rhs_atomic_counter_;
+    HypreIntType numMatPtsToAssembleTotal_=0;
+    HypreIntType numRhsPtsToAssembleTotal_=0;
+    Kokkos::View<HypreIntType *> mat_partitionStart_;
+    Kokkos::View<HypreIntType *> rhs_partitionStart_;
+
+    //! list for the row indices ... later to be assembled to the CSR matrix in Hypre
+    Kokkos::View<HypreIntType*> rows_;
+    //! list for the column indices ... later to be assembled to the CSR matrix in Hypre
+    Kokkos::View<HypreIntType*> cols_;
+    //! list for the values ... later to be assembled to the CSR matrix in Hypre
+    Kokkos::View<double*> vals_;
+    //! list for the rhs row indices ... later to be assembled to the rhs vector in Hypre
+    Kokkos::View<HypreIntType*> rhsRows_;
+    //! list for the rhs values ... later to be assembled to the rhs vector in Hypre
+    Kokkos::View<double*> rhsVals_;
+
+    //! Flags indicating whether a particular row in the HYPRE matrix has been filled or not.
+    enum RowFillStatus
+      {
+	RS_UNFILLED = 0, //!< Default status
+	RS_FILLED        //!< sumInto filps to filled status once a row has been acted on
+      };    
+    //! Track rows that have been updated during the assembly process
+    Kokkos::View<RowFillStatus*> rowFilled_;
+    Kokkos::View<RowFillStatus*>::HostMirror rowFilledHost_;
+
+    //! Total number of rows owned by this particular MPI rank
+    HypreIntType numRows_;
+    //! Flag indicating that sumInto should check to see if rows must be skipped
+    bool checkSkippedRows_{false};
+  };
+
+  /***************************************************************************************************/
+  /*                        End of of HypreLinSysCoeffApplier definition                             */
+  /***************************************************************************************************/
 
   /** Reset the matrix and rhs data structures for the next iteration/timestep
    *
@@ -280,6 +340,7 @@ public:
     const double,
     const double)
   {
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
     checkSkippedRows_ = false;
   }
 
@@ -291,6 +352,7 @@ public:
     const double,
     const double)
   {
+    printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
     checkSkippedRows_ = false;
   }
 
@@ -334,6 +396,8 @@ protected:
    *  @return The HYPRE row ID
    */
   HypreIntType get_entity_hypre_id(const stk::mesh::Entity&);
+  HypreIntType get_entity_hypre_id(stk::mesh::EntityRank rank,
+				   const stk::mesh::Entity&);
 
   //! Helper method to transfer the solution from a HYPRE_IJVector instance to
   //! the STK field data instance.

@@ -99,15 +99,16 @@ AssembleElemSolverAlgorithm::execute()
     activeKernels_[i]->setup(*realm_.timeIntegrator_);
 
   auto ngpKernels = nalu_ngp::create_ngp_view<Kernel>(activeKernels_);
-  auto coeffApplier = coeff_applier();
+  auto coeffApplier = coeff_applier();  
   auto newCoeffApplier = new_coeff_applier();
 
   double diagRelaxFactor = diagRelaxFactor_;
   int rhsSize = rhsSize_;
   unsigned nodesPerEntity = nodesPerEntity_;
 
-  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
   eqSystem_->linsys_->printInfo();  
+  printf("%s %s %d : Equation System %s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
+
   run_algorithm(
     realm_.bulk_data(),
     KOKKOS_LAMBDA(SharedMemData<DeviceTeamHandleType, DeviceShmem> & smdata) {
@@ -130,6 +131,12 @@ AssembleElemSolverAlgorithm::execute()
           smdata.lhs(ir, ir) /= diagRelaxFactor;
         coeffApplier(nodesPerEntity, smdata.ngpElemNodes[simdElemIndex],
                     smdata.scratchIds, smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+
+	if (eqSystem_->name_=="ContinuityEQS" || eqSystem_->name_=="WallDistEQS"
+	    || eqSystem_->name_=="TurbKineticEnergyEQS"|| eqSystem_->name_=="MomentumEQS") {
+	  newCoeffApplier(nodesPerEntity, smdata.ngpElemNodes[simdElemIndex], smdata.scratchIds,
+			  smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+	}
       }
     });
 

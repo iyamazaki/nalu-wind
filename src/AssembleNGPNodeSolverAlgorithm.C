@@ -114,8 +114,9 @@ AssembleNGPNodeSolverAlgorithm::execute()
 
   auto team_exec = get_device_team_policy(buckets.size(), bytes_per_team, bytes_per_thread);
 
-  printf("%s %s %d\n",__FILE__,__FUNCTION__,__LINE__);
   eqSystem_->linsys_->printInfo();  
+  printf("%s %s %d : Equation System %s\n",__FILE__,__FUNCTION__,__LINE__,eqSystem_->name_.c_str());
+
   Kokkos::parallel_for(
     team_exec, KOKKOS_LAMBDA(const DeviceTeamHandleType& team) {
       auto bktId = buckets.device_get(team.league_rank());
@@ -142,6 +143,12 @@ AssembleNGPNodeSolverAlgorithm::execute()
           coeffApplier(
             nodesPerEntity, smdata.ngpNodes, smdata.scratchIds,
             smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+
+	  if (eqSystem_->name_=="ContinuityEQS" || eqSystem_->name_=="WallDistEQS"
+	    || eqSystem_->name_=="TurbKineticEnergyEQS"|| eqSystem_->name_=="MomentumEQS") {
+	    newCoeffApplier(nodesPerEntity, smdata.ngpNodes, smdata.scratchIds,
+			    smdata.sortPermutation, smdata.rhs, smdata.lhs, __FILE__);
+	  }
         });
     });
   eqSystem_->linsys_->printInfo();
